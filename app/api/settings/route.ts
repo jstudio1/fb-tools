@@ -3,6 +3,7 @@ import { loadSettings, saveSettings, PromptPreset } from "@/lib/store";
 import crypto from "node:crypto";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   return NextResponse.json(loadSettings());

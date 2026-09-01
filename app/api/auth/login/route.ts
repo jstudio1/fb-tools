@@ -3,6 +3,10 @@ import crypto from "node:crypto";
 import { getLoginUrl } from "@/lib/facebook";
 
 export const runtime = "nodejs";
+// Must generate a fresh random `state` per request — without this Next.js
+// prerenders the route at build time and would reuse the same state/cookie
+// for every visitor forever, defeating the CSRF check on /api/auth/callback.
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
