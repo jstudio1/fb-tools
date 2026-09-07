@@ -90,11 +90,22 @@ export default function Poster({ user }: { user: CurrentUser }) {
   }, []);
 
   return (
-    <main>
+    <main className="workspace">
+      <aside className="sidebar">
+        <a className="brand" href="/"><span className="brand-mark">P</span><span>Pagecraft<small>FACEBOOK WORKSPACE</small></span></a>
+        <p className="nav-label">WORKSPACE</p>
+        <nav aria-label="เมนูหลัก">
+          {([{ id: "compose", icon: "＋", label: "สร้างโพสต์" }, { id: "history", icon: "◷", label: "ประวัติการโพสต์" }, { id: "settings", icon: "✧", label: "คลัง Prompt" }, ...(user.role === "owner" ? [{ id: "users", icon: "⊞", label: "จัดการผู้ใช้" }] : [])]).map(item => <button key={item.id} className={tab === item.id ? "nav-item active" : "nav-item"} onClick={() => setTab(item.id as Tab)}><span>{item.icon}</span>{item.label}{tab === item.id && <i />}</button>)}
+        </nav>
+        <div className="sidebar-bottom"><span className="avatar">{user.displayName.slice(0, 1)}</span><div><strong>{user.displayName}</strong><small>{user.role === "owner" ? "เจ้าของระบบ" : "สมาชิก"} · @{user.username}</small></div></div>
+      </aside>
+      <div className="workspace-body">
+      <header className="workspace-top"><span>Workspace <span className="breadcrumb">/ {({ compose: "สร้างโพสต์", history: "ประวัติการโพสต์", settings: "คลัง Prompt", users: "จัดการผู้ใช้" })[tab]}</span></span><span className="private-badge">● พื้นที่ส่วนตัว</span></header>
       <div className="app-heading">
-        <div><h1>📣 Facebook Multi-Page Poster</h1><p className="subtitle">โพสต์รูปภาพ + ข้อความ ไปหลายเพจพร้อมกันในคลิกเดียว</p></div>
+        <div><p className="eyebrow">YOUR CONTENT, CONNECTED.</p><h1>{({ compose: "ทุกเพจ พร้อมโพสต์เดียวกัน", history: "ทุกโพสต์ อยู่ในที่เดียว", settings: "สร้างข้อความในสไตล์ของคุณ", users: "จัดการทีมของคุณ" })[tab]}</h1><p className="subtitle">{({ compose: "เลือกเพจ เตรียมคอนเทนต์ และตรวจความเรียบร้อยก่อนเผยแพร่", history: "ย้อนดูเนื้อหา เวลา และผลการเผยแพร่ของแต่ละเพจ", settings: "เก็บคำสั่งที่ใช้บ่อย เพื่อให้ทุกแคปชั่นสื่อสารในแบบที่ต้องการ", users: "สร้างบัญชีและจัดการการเข้าถึงพื้นที่ทำงาน" })[tab]}</p></div>
         <div className="account-box"><span><strong>{user.displayName}</strong><small>@{user.username}{user.role === "owner" ? " · เจ้าของระบบ" : ""}</small></span><button className="btn btn-secondary" onClick={async () => { await fetch("/api/auth/session", { method: "DELETE" }); location.href = "/login"; }}>ออกจากระบบ</button></div>
       </div>
+      <div className="workspace-metrics"><div><span>เพจที่เชื่อมต่อ</span><strong>{pages.length.toString().padStart(2, "0")} <small>เพจ</small></strong></div><div><span>Prompt พร้อมใช้</span><strong>{prompts.length.toString().padStart(2, "0")} <small>รูปแบบ</small></strong></div><div><span>บัญชีของคุณ</span><strong className="metric-text">{user.role === "owner" ? "เจ้าของระบบ" : "สมาชิก"} <small className="live-dot">● ใช้งานอยู่</small></strong></div></div>
 
       {connectedCount && (
         <div className="banner ok">เชื่อมต่อสำเร็จ พบ {connectedCount} เพจที่คุณเป็นแอดมิน</div>
@@ -119,15 +130,15 @@ export default function Poster({ user }: { user: CurrentUser }) {
         </a>
       </div>
 
-      {tab === "compose" && (
-        <>
+      <div hidden={tab !== "compose"}>
           <TokenImport onImported={(pgs) => setPages(pgs)} />
           <ComposeTab pages={pages} prompts={prompts} />
-        </>
-      )}
+      </div>
       {tab === "history" && <HistoryTab />}
       {tab === "settings" && <SettingsTab prompts={prompts} onSaved={setPrompts} />}
       {tab === "users" && user.role === "owner" && <UsersTab currentUserId={user.id} />}
+      <footer className="workspace-footer"><span>Pagecraft · Facebook workspace</span><span>คอนเทนต์ของคุณ ทุกเพจของคุณ</span></footer>
+      </div>
     </main>
   );
 }
@@ -192,10 +203,18 @@ function Modal({
   confirmTone?: "confirm" | "danger";
   children: React.ReactNode;
 }) {
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !confirming) onCancel(); };
+    document.addEventListener("keydown", close);
+    return () => { document.body.style.overflow = previous; document.removeEventListener("keydown", close); };
+  }, [open, confirming, onCancel]);
   if (!open) return null;
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={() => { if (!confirming) onCancel(); }}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
           {subtitle && <p>{subtitle}</p>}
@@ -414,6 +433,7 @@ function FacebookPreview({ page, caption, imageUrls }: { page: FbPage; caption: 
 }
 
 function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset[] }) {
+  const [pageSearch, setPageSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [pool, setPool] = useState<CaptionItem[]>([]);
@@ -634,7 +654,7 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
 
       <section className="card">
         <div className="row">
-          <p className="card-title">🏷️ เพจของคุณ ({pages.length})</p>
+          <p className="card-title"><span className="step-number">01</span> เลือกเพจปลายทาง <span className="badge">{pages.length} เพจ</span></p>
         </div>
 
         {pages.length === 0 ? (
@@ -652,11 +672,13 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
                 เลือกแล้ว {selected.size} / {pages.length}
               </span>
             </div>
+            <input type="search" className="page-search" aria-label="ค้นหาเพจ" placeholder="ค้นหาชื่อเพจ…" value={pageSearch} onChange={e => setPageSearch(e.target.value)} />
+            {pageSearch && !pages.some(p => p.name.toLowerCase().includes(pageSearch.toLowerCase())) && <p className="empty-state">ไม่พบเพจที่ตรงกับ “{pageSearch}” ลองค้นหาด้วยชื่ออื่น</p>}
             <div className="page-list">
-              {pages.map((p) => (
+              {pages.filter(p => p.name.toLowerCase().includes(pageSearch.toLowerCase())).map((p) => (
                 <label className={`page-row ${selected.has(p.id) ? "selected" : ""}`} key={p.id}>
                   <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
-                  {p.picture ? <img src={p.picture} alt="" /> : <div className="page-row-avatar" />}
+                  {p.picture ? <img src={p.picture} alt="" /> : <div className="page-row-avatar">{p.name.slice(0, 1)}</div>}
                   <span className="page-row-name">{p.name}</span>
                 </label>
               ))}
@@ -667,7 +689,7 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
 
       <section className="card">
         <div className="row">
-          <p className="card-title">📝 คลังข้อความ ({nonEmptyPool.length})</p>
+          <p className="card-title"><span className="step-number">02</span> เตรียมข้อความ <span className="badge">{nonEmptyPool.length} ชุด</span></p>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-secondary" onClick={() => setPool((prev) => [...prev, { id: newId(), text: "" }])}>
               + เพิ่มข้อความเอง
@@ -698,7 +720,7 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
       </section>
 
       <section className="card">
-        <p className="card-title">🖼️ รูปภาพ</p>
+        <p className="card-title"><span className="step-number">03</span> รูปภาพประกอบ</p>
         <div className="section-gap" />
         <div className="mode-picker">
           <label className={`mode-option ${imageMode === "same" ? "active" : ""}`}>
@@ -716,7 +738,7 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
             </div>
           </label>
         </div>
-        <input type="file" accept="image/*" multiple onChange={onFilesChange} />
+        <label className="upload-zone"><span className="upload-icon">＋</span><strong>เพิ่มรูปภาพให้โพสต์ของคุณ</strong><span>เลือกได้หลายภาพ แล้วจัดลำดับก่อนเผยแพร่</span><input aria-label="เลือกรูปภาพ" type="file" accept="image/*" multiple onChange={onFilesChange} /></label>
         {imageFiles.length > 0 && (
           <div className="thumb-grid">
             {imageFiles.map((f, i) => (
@@ -824,7 +846,7 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
       </section>
 
       <button className="btn btn-block" disabled={posting || pages.length === 0} onClick={openConfirm}>
-        {scheduleEnabled ? `ตั้งเวลาโพสต์ (${selected.size} เพจ)` : `โพสต์ทันที (${selected.size} เพจ)`}
+        {scheduleEnabled ? `ตรวจสอบและตั้งเวลา · ${selected.size} เพจ →` : `ตรวจสอบก่อนเผยแพร่ · ${selected.size} เพจ →`}
       </button>
 
       <GenerateModal
@@ -921,8 +943,8 @@ function HistoryTab() {
       .catch(() => setHistory([]));
   }, []);
 
-  if (history === null) return <p className="muted">กำลังโหลด…</p>;
-  if (history.length === 0) return <p className="muted">ยังไม่มีประวัติการโพสต์</p>;
+  if (history === null) return <div className="card empty-state" role="status">กำลังโหลดประวัติการโพสต์…</div>;
+  if (history.length === 0) return <section className="card empty-state"><span className="empty-icon">◷</span><h2>โพสต์แรกของคุณเริ่มต้นได้ที่นี่</h2><p>เมื่อเผยแพร่หรือตั้งเวลาโพสต์แล้ว คุณจะย้อนดูเนื้อหาและผลลัพธ์ของแต่ละเพจได้ในหน้านี้</p></section>;
 
   return (
     <section className="card">

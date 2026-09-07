@@ -5,3 +5,4 @@ data/**/*.json
 data/*.json
 .env.local
 *.log
+*.tsbuildinfo

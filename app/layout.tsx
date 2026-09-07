@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Facebook Multi-Page Poster",
+  title: "Pagecraft — Facebook Workspace",
   description: "โพสต์รูปภาพ+ข้อความไปหลายเพจ Facebook พร้อมกัน",
 };
 
