@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { loadPages, appendHistory } from "@/lib/store";
 import { postToPage } from "@/lib/facebook";
 import crypto from "node:crypto";
+import { getRequestUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,8 @@ const MAX_SCHEDULE_MS = 75 * 24 * 60 * 60 * 1000; // and at most 75 days ahead
 type Pair = { pageId: string; caption: string; imageIndex?: number | null };
 
 export async function POST(req: NextRequest) {
+  const user = getRequestUser(req);
+  if (!user) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   const form = await req.formData();
 
   const pairsRaw = String(form.get("pairs") || "[]");
@@ -25,7 +28,11 @@ export async function POST(req: NextRequest) {
   // imageMode: "same" = every page gets the full set of uploaded images;
   // "random1" = each page gets exactly one image, picked per-pair via imageIndex;
   // "none" = no images at all.
-  const imageMode = (String(form.get("imageMode") || "same") as "same" | "random1" | "none");
+  const rawImageMode = String(form.get("imageMode") || "same");
+  if (!["same", "random1", "none"].includes(rawImageMode)) {
+    return NextResponse.json({ error: "รูปแบบการใช้รูปภาพไม่ถูกต้อง" }, { status: 400 });
+  }
+  const imageMode = rawImageMode as "same" | "random1" | "none";
   const images = form.getAll("images").filter((v): v is File => v instanceof File && v.size > 0);
   const scheduledForRaw = form.get("scheduledFor"); // ISO string from <input type=datetime-local>
 
@@ -61,7 +68,7 @@ export async function POST(req: NextRequest) {
     scheduledForIso = scheduledDate.toISOString();
   }
 
-  const allPages = loadPages();
+  const allPages = loadPages(user.id);
   const targets = pairs
     .map((p) => {
       const page = allPages.find((ap) => ap.id === p.pageId);
@@ -95,7 +102,7 @@ export async function POST(req: NextRequest) {
     )
   );
 
-  appendHistory({
+  appendHistory(user.id, {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     imageMode,

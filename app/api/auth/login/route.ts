@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { getLoginUrl } from "@/lib/facebook";
+import { getRequestUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 // Must generate a fresh random `state` per request — without this Next.js
@@ -8,8 +9,10 @@ export const runtime = "nodejs";
 // for every visitor forever, defeating the CSRF check on /api/auth/callback.
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const user = getRequestUser(req);
+    if (!user) return NextResponse.redirect(new URL("/login", req.url));
     const state = crypto.randomBytes(16).toString("hex");
     const url = getLoginUrl(state);
     const res = NextResponse.redirect(url);
@@ -19,6 +22,11 @@ export async function GET() {
       maxAge: 300,
       sameSite: "lax",
       path: "/",
+      secure: (process.env.APP_BASE_URL || "").startsWith("https://"),
+    });
+    res.cookies.set("fb_oauth_user", user.id, {
+      httpOnly: true, maxAge: 300, sameSite: "lax", path: "/",
+      secure: (process.env.APP_BASE_URL || "").startsWith("https://"),
     });
     return res;
   } catch (err: any) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLongLivedUserToken, getUserPages } from "@/lib/facebook";
 import { upsertPages } from "@/lib/store";
+import { getRequestUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,8 @@ export const runtime = "nodejs";
  * selected there and pages_show_list + pages_manage_posts granted).
  */
 export async function POST(req: NextRequest) {
+  const user = getRequestUser(req);
+  if (!user) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const token = String(body?.token || "").trim();
 
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    upsertPages(pages);
+    upsertPages(user.id, pages);
     return NextResponse.json({ count: pages.length });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "นำเข้าไม่สำเร็จ" }, { status: 500 });

@@ -26,8 +26,10 @@ type HistoryEntry = {
 type PromptPreset = { id: string; name: string; prompt: string };
 type CaptionItem = { id: string; text: string; source?: string };
 type ImageMode = "same" | "random1";
+type CurrentUser = { id: string; username: string; displayName: string; role: "owner" | "user"; active: boolean; createdAt: string };
+type ManagedUser = CurrentUser;
 
-type Tab = "compose" | "history" | "settings";
+type Tab = "compose" | "history" | "settings" | "users";
 
 // ---- Random assignment helpers ----
 // Assigns one item per page by cycling through a shuffled copy of the pool,
@@ -67,7 +69,7 @@ function newId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export default function Poster() {
+export default function Poster({ user }: { user: CurrentUser }) {
   const searchParams = useSearchParams();
   const connectedCount = searchParams.get("connected");
   const oauthError = searchParams.get("error");
@@ -89,8 +91,10 @@ export default function Poster() {
 
   return (
     <main>
-      <h1>📣 Facebook Multi-Page Poster</h1>
-      <p className="subtitle">โพสต์รูปภาพ + ข้อความ ไปหลายเพจพร้อมกันในคลิกเดียว</p>
+      <div className="app-heading">
+        <div><h1>📣 Facebook Multi-Page Poster</h1><p className="subtitle">โพสต์รูปภาพ + ข้อความ ไปหลายเพจพร้อมกันในคลิกเดียว</p></div>
+        <div className="account-box"><span><strong>{user.displayName}</strong><small>@{user.username}{user.role === "owner" ? " · เจ้าของระบบ" : ""}</small></span><button className="btn btn-secondary" onClick={async () => { await fetch("/api/auth/session", { method: "DELETE" }); location.href = "/login"; }}>ออกจากระบบ</button></div>
+      </div>
 
       {connectedCount && (
         <div className="banner ok">เชื่อมต่อสำเร็จ พบ {connectedCount} เพจที่คุณเป็นแอดมิน</div>
@@ -108,6 +112,7 @@ export default function Poster() {
           <button className={`tab ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>
             ตั้งค่า Prompt
           </button>
+          {user.role === "owner" && <button className={`tab ${tab === "users" ? "active" : ""}`} onClick={() => setTab("users")}>ผู้ใช้งาน</button>}
         </div>
         <a className="btn btn-secondary" href="/api/auth/login">
           เชื่อมต่อ / ซิงก์เพจ Facebook
@@ -122,6 +127,7 @@ export default function Poster() {
       )}
       {tab === "history" && <HistoryTab />}
       {tab === "settings" && <SettingsTab prompts={prompts} onSaved={setPrompts} />}
+      {tab === "users" && user.role === "owner" && <UsersTab currentUserId={user.id} />}
     </main>
   );
 }
@@ -381,6 +387,32 @@ function GenerateModal({
   );
 }
 
+function FacebookPreview({ page, caption, imageUrls }: { page: FbPage; caption: string; imageUrls: string[] }) {
+  const visible = imageUrls.slice(0, 5);
+  return (
+    <article className="fb-preview">
+      <div className="fb-preview-head">
+        {page.picture ? <img src={page.picture} alt="" /> : <div className="fb-avatar-fallback">{page.name.slice(0, 1)}</div>}
+        <div><strong>{page.name}</strong><div>เมื่อสักครู่ · <span aria-label="สาธารณะ">🌐</span></div></div>
+        <span className="fb-menu">•••</span>
+      </div>
+      {caption && <div className="fb-caption">{caption}</div>}
+      {visible.length > 0 && (
+        <div className={`fb-photo-grid photos-${visible.length}`}>
+          {visible.map((url, index) => (
+            <div className="fb-photo" key={url}>
+              <img src={url} alt={`รูปที่ ${index + 1}`} />
+              {index === 4 && imageUrls.length > 5 && <span className="fb-more">+{imageUrls.length - 5}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="fb-reactions"><span>👍 ❤️</span><span>0 ความคิดเห็น</span></div>
+      <div className="fb-actions"><span>👍 ถูกใจ</span><span>💬 แสดงความคิดเห็น</span><span>↗ แชร์</span></div>
+    </article>
+  );
+}
+
 function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -399,10 +431,13 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
   const [results, setResults] = useState<PostResult[] | null>(null);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [previewPageId, setPreviewPageId] = useState("");
 
   const allSelected = pages.length > 0 && selected.size === pages.length;
   const selectedPages = useMemo(() => pages.filter((p) => selected.has(p.id)), [pages, selected]);
   const nonEmptyPool = useMemo(() => pool.filter((c) => c.text.trim().length > 0), [pool]);
+  const imageUrls = useMemo(() => imageFiles.map((file) => URL.createObjectURL(file)), [imageFiles]);
+  useEffect(() => () => imageUrls.forEach((url) => URL.revokeObjectURL(url)), [imageUrls]);
 
   // Reset manual overrides whenever the underlying pools change shape, so stale
   // picks (pointing at a caption/image that no longer exists) can't linger.
@@ -462,6 +497,16 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
 
   function removeImage(idx: number) {
     setImageFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function moveImage(from: number, direction: -1 | 1) {
+    setImageFiles((prev) => {
+      const to = from + direction;
+      if (to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next;
+    });
   }
 
   function updateCaption(idx: number, value: string) {
@@ -532,6 +577,7 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
       setMessage({ type: "err", text: "กรุณาเลือกวันเวลาที่จะโพสต์" });
       return;
     }
+    setPreviewPageId(selectedPages[0]?.id || "");
     setConfirmOpen(true);
   }
 
@@ -674,16 +720,22 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
         {imageFiles.length > 0 && (
           <div className="thumb-grid">
             {imageFiles.map((f, i) => (
-              <div className="thumb" key={i}>
-                <img src={URL.createObjectURL(f)} alt="" />
+              <div className="thumb" key={`${f.name}-${f.lastModified}-${i}`}>
+                <img src={imageUrls[i]} alt="" />
                 {imageMode === "random1" && <span className="index-badge">#{i + 1}</span>}
                 <button onClick={() => removeImage(i)} title="ลบรูปนี้">
                   ✕
                 </button>
+                <div className="thumb-order">
+                  <button onClick={() => moveImage(i, -1)} disabled={i === 0} title="เลื่อนไปซ้าย">‹</button>
+                  <span>{i + 1}</span>
+                  <button onClick={() => moveImage(i, 1)} disabled={i === imageFiles.length - 1} title="เลื่อนไปขวา">›</button>
+                </div>
               </div>
             ))}
           </div>
         )}
+        {imageFiles.length > 1 && <p className="card-subtext">ใช้ปุ่ม ‹ › บนรูปเพื่อจัดลำดับ ลำดับนี้จะใช้ทั้งในพรีวิวและตอนโพสต์จริง</p>}
       </section>
 
       {showMatchTable && (
@@ -826,22 +878,14 @@ function ComposeTab({ pages, prompts }: { pages: FbPage[]; prompts: PromptPreset
         )}
 
         <div className="divider" />
-        <p className="card-subtext" style={{ marginBottom: 8 }}>
-          รายละเอียดที่จะโพสต์ในแต่ละเพจ:
-        </p>
-        <div className="assign-list">
-          {pairs.map(({ page, caption, imageLabel }) => (
-            <div className="assign-row" key={page.id}>
-              <div className="assign-page">{page.name}</div>
-              <div className="assign-caption">
-                {imageMode === "random1" && imageLabel && (
-                  <div style={{ color: "var(--accent)", marginBottom: 4 }}>🖼️ {imageLabel}</div>
-                )}
-                {caption || <em>(ไม่มีข้อความ{imageFiles.length > 0 ? " แนบแค่รูป" : ""})</em>}
-              </div>
-            </div>
-          ))}
-        </div>
+        <div className="preview-toolbar"><label>พรีวิวเพจ</label><select value={previewPageId} onChange={(e) => setPreviewPageId(e.target.value)}>{pairs.map(({ page }) => <option key={page.id} value={page.id}>{page.name}</option>)}</select></div>
+        {(() => {
+          const pair = pairs.find(({ page }) => page.id === previewPageId) || pairs[0];
+          if (!pair) return null;
+          const urls = imageMode === "same" ? imageUrls : pair.imageIndex !== null ? [imageUrls[pair.imageIndex]] : [];
+          return <FacebookPreview page={pair.page} caption={pair.caption} imageUrls={urls.filter(Boolean)} />;
+        })()}
+        <p className="preview-note">พรีวิวจำลองการจัดวางใกล้เคียง Facebook; Facebook อาจปรับสัดส่วนเล็กน้อยตามอุปกรณ์และขนาดภาพจริง</p>
       </Modal>
 
       {results && (
@@ -1022,5 +1066,66 @@ function SettingsTab({ prompts, onSaved }: { prompts: PromptPreset[]; onSaved: (
         </div>
       )}
     </section>
+  );
+}
+
+function UsersTab({ currentUserId }: { currentUserId: string }) {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [form, setForm] = useState({ username: "", displayName: "", password: "" });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  async function load() {
+    const response = await fetch("/api/users");
+    const data = await response.json();
+    if (response.ok) setUsers(data.users || []);
+  }
+  useEffect(() => { load().catch(() => setMessage({ type: "err", text: "โหลดรายชื่อผู้ใช้ไม่สำเร็จ" })); }, []);
+
+  async function create() {
+    setBusy(true); setMessage(null);
+    try {
+      const response = await fetch("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(form) });
+      const data = await response.json();
+      if (!response.ok) setMessage({ type: "err", text: data.error || "สร้างบัญชีไม่สำเร็จ" });
+      else { setForm({ username: "", displayName: "", password: "" }); setMessage({ type: "ok", text: `สร้างบัญชี @${data.user.username} แล้ว` }); await load(); }
+    } finally { setBusy(false); }
+  }
+
+  async function patchUser(id: string, changes: Record<string, unknown>) {
+    const response = await fetch("/api/users", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...changes }) });
+    const data = await response.json();
+    if (!response.ok) setMessage({ type: "err", text: data.error || "แก้ไขบัญชีไม่สำเร็จ" });
+    else { setMessage({ type: "ok", text: "อัปเดตบัญชีแล้ว" }); await load(); }
+  }
+
+  async function resetPassword(user: ManagedUser) {
+    const password = window.prompt(`ตั้งรหัสผ่านใหม่ให้ @${user.username} (อย่างน้อย 8 ตัว)`);
+    if (password === null) return;
+    await patchUser(user.id, { password });
+  }
+
+  return (
+    <>
+      {message && <div className={`banner ${message.type}`}>{message.text}</div>}
+      <section className="card">
+        <p className="card-title">👤 สร้างบัญชีผู้ใช้</p>
+        <p className="card-subtext">ผู้ใช้จะสมัครเองไม่ได้ แต่ละบัญชีจะเห็นเฉพาะเพจ, token, prompt และประวัติของตัวเอง</p>
+        <div className="user-create-grid">
+          <input placeholder="Username เช่น somchai" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
+          <input placeholder="ชื่อที่แสดง" value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
+          <input type="password" placeholder="รหัสผ่านอย่างน้อย 8 ตัว" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <button className="btn" disabled={busy || !form.username || !form.displayName || form.password.length < 8} onClick={create}>{busy ? "กำลังสร้าง…" : "สร้างบัญชี"}</button>
+        </div>
+      </section>
+      <section className="card">
+        <p className="card-title">บัญชีทั้งหมด ({users.length})</p><div className="section-gap" />
+        <div className="users-list">{users.map((item) => <div className="user-row" key={item.id}>
+          <div><strong>{item.displayName}</strong><small>@{item.username} · {item.role === "owner" ? "เจ้าของระบบ" : "ผู้ใช้"}</small></div>
+          <span className={`status-pill ${item.active ? "active" : "inactive"}`}>{item.active ? "ใช้งานได้" : "ปิดใช้งาน"}</span>
+          <div className="user-actions"><button className="btn btn-secondary" onClick={() => resetPassword(item)}>เปลี่ยนรหัส</button>{item.id !== currentUserId && item.role !== "owner" && <button className={`btn ${item.active ? "btn-danger" : "btn-secondary"}`} onClick={() => patchUser(item.id, { active: !item.active })}>{item.active ? "ปิดบัญชี" : "เปิดบัญชี"}</button>}</div>
+        </div>)}</div>
+      </section>
+    </>
   );
 }

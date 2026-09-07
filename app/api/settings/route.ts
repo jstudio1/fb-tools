@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadSettings, saveSettings, PromptPreset } from "@/lib/store";
 import crypto from "node:crypto";
+import { getRequestUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  return NextResponse.json(loadSettings());
+export async function GET(req: NextRequest) {
+  const user = getRequestUser(req);
+  if (!user) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
+  return NextResponse.json(loadSettings(user.id));
 }
 
 export async function POST(req: NextRequest) {
+  const user = getRequestUser(req);
+  if (!user) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const prompts = body?.prompts;
 
@@ -31,6 +36,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  saveSettings({ prompts: cleaned });
+  saveSettings(user.id, { prompts: cleaned });
   return NextResponse.json({ ok: true, prompts: cleaned });
 }

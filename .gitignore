@@ -1,6 +1,7 @@
 node_modules
 .next
 out
+data/**/*.json
 data/*.json
 .env.local
 *.log

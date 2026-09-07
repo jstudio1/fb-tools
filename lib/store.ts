@@ -36,9 +36,11 @@ export type Settings = {
 };
 
 const DATA_DIR = path.join(process.cwd(), "data");
-const PAGES_FILE = path.join(DATA_DIR, "pages.json");
-const HISTORY_FILE = path.join(DATA_DIR, "history.json");
-const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+
+function userFile(userId: string, name: string) {
+  if (!/^[a-f0-9-]{36}$/i.test(userId)) throw new Error("รหัสผู้ใช้ไม่ถูกต้อง");
+  return path.join(DATA_DIR, "accounts", userId, name);
+}
 
 const DEFAULT_CAPTION_PROMPT = `คุณเป็นแอดมินเพจฟิตเนส เขียนแคปชั่นโพสต์ Facebook ภาษาไทย
 โทนสนุก กระตุ้นให้คนอยากมาออกกำลังกาย ใช้อีโมจิพอประมาณ
@@ -67,27 +69,42 @@ function readJson<T>(file: string, fallback: T): T {
 }
 
 function writeJson(file: string, value: unknown) {
-  ensureDataDir();
-  fs.writeFileSync(file, JSON.stringify(value, null, 2), "utf-8");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(value, null, 2), "utf-8");
+  fs.renameSync(temporary, file);
+}
+
+/** Copy pre-login data to the owner account once, preserving existing installations. */
+export function migrateLegacyData(userId: string) {
+  const legacyFiles = ["pages.json", "history.json", "settings.json"];
+  for (const name of legacyFiles) {
+    const legacy = path.join(DATA_DIR, name);
+    const target = userFile(userId, name);
+    if (fs.existsSync(legacy) && !fs.existsSync(target)) {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(legacy, target);
+    }
+  }
 }
 
 // ---- Pages ----
 
-export function loadPages(): StoredPage[] {
-  return readJson<StoredPage[]>(PAGES_FILE, []);
+export function loadPages(userId: string): StoredPage[] {
+  return readJson<StoredPage[]>(userFile(userId, "pages.json"), []);
 }
 
-export function savePages(pages: StoredPage[]) {
-  writeJson(PAGES_FILE, pages);
+export function savePages(userId: string, pages: StoredPage[]) {
+  writeJson(userFile(userId, "pages.json"), pages);
 }
 
 /** Merge newly-fetched pages into storage (keeps pages from earlier syncs too). */
-export function upsertPages(newPages: StoredPage[]) {
-  const existing = loadPages();
+export function upsertPages(userId: string, newPages: StoredPage[]) {
+  const existing = loadPages(userId);
   const byId = new Map(existing.map((p) => [p.id, p]));
   for (const p of newPages) byId.set(p.id, p);
   const merged = Array.from(byId.values());
-  savePages(merged);
+  savePages(userId, merged);
   return merged;
 }
 
@@ -98,20 +115,20 @@ export function publicPages(pages: StoredPage[]) {
 
 // ---- History ----
 
-export function loadHistory(): HistoryEntry[] {
-  return readJson<HistoryEntry[]>(HISTORY_FILE, []);
+export function loadHistory(userId: string): HistoryEntry[] {
+  return readJson<HistoryEntry[]>(userFile(userId, "history.json"), []);
 }
 
-export function appendHistory(entry: HistoryEntry) {
-  const history = loadHistory();
+export function appendHistory(userId: string, entry: HistoryEntry) {
+  const history = loadHistory(userId);
   history.unshift(entry); // newest first
-  writeJson(HISTORY_FILE, history.slice(0, 500)); // keep it bounded
+  writeJson(userFile(userId, "history.json"), history.slice(0, 500)); // keep it bounded
 }
 
 // ---- Settings (named prompt presets) ----
 
-export function loadSettings(): Settings {
-  const raw = readJson<any>(SETTINGS_FILE, null);
+export function loadSettings(userId: string): Settings {
+  const raw = readJson<any>(userFile(userId, "settings.json"), null);
   if (!raw) return { prompts: DEFAULT_PROMPTS };
 
   if (Array.isArray(raw.prompts) && raw.prompts.length > 0) {
@@ -123,13 +140,13 @@ export function loadSettings(): Settings {
     const migrated: Settings = {
       prompts: [{ id: "default", name: "Prompt หลัก", prompt: raw.captionPrompt }],
     };
-    saveSettings(migrated);
+    saveSettings(userId, migrated);
     return migrated;
   }
 
   return { prompts: DEFAULT_PROMPTS };
 }
 
-export function saveSettings(settings: Settings) {
-  writeJson(SETTINGS_FILE, settings);
+export function saveSettings(userId: string, settings: Settings) {
+  writeJson(userFile(userId, "settings.json"), settings);
 }
